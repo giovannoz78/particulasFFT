@@ -1,0 +1,186 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Voz → Partículas + Espectrograma</title>
+<style>
+  html,body{margin:0;height:100%;background:#000;overflow:hidden}
+  canvas.p5Canvas{position:fixed;inset:0;display:block}
+  #ui,#msg,#out{display:none !important}
+</style>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.3/p5.min.js"></script>
+</head>
+<body>
+<script>
+const LANG="es-ES";
+const TEXT_SIZE=180;
+const STEP=6;
+const MAX_PARTS=1200;
+const FFT_SIZE=2048;
+const COL_W=2;
+
+let recog, listening=false, texto="DI UNA PALABRA";
+let parts=[], pg;
+let audioCtx, analyser, freqData;
+let specBuf, specCtx2d, specHead=0;
+
+function setup(){
+  createCanvas(windowWidth, windowHeight).addClass('p5Canvas');
+  pixelDensity(1);
+  pg=createGraphics(width,height); pg.pixelDensity(1);
+
+  specBuf=document.createElement('canvas');
+  specBuf.width=width; specBuf.height=height;
+  specCtx2d=specBuf.getContext('2d');
+  specCtx2d.fillStyle='#000';
+  specCtx2d.fillRect(0,0,width,height);
+
+  background(0);
+  renderText(texto);
+  initSpeech();
+
+  try{ startMic(); }catch(_){}
+  window.addEventListener('pointerdown', ()=>startMic(), {once:true});
+}
+
+function windowResized(){
+  resizeCanvas(windowWidth, windowHeight);
+  pg=createGraphics(width,height); pg.pixelDensity(1);
+  specBuf.width=width; specBuf.height=height;
+  specCtx2d.fillStyle='#000';
+  specCtx2d.fillRect(0,0,width,height);
+  specHead=0;
+  renderText(texto);
+}
+
+/* ── Audio para espectrograma (mismo stream del micrófono) ── */
+function initAudio(stream){
+  if(audioCtx) return;
+  audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+  analyser=audioCtx.createAnalyser();
+  analyser.fftSize=FFT_SIZE;
+  analyser.smoothingTimeConstant=0.8;
+  freqData=new Uint8Array(analyser.frequencyBinCount);
+  audioCtx.createMediaStreamSource(stream).connect(analyser);
+}
+
+/* ── Speech ── */
+function initSpeech(){
+  const SR=window.webkitSpeechRecognition||window.SpeechRecognition;
+  if(!SR) return;
+  recog=new SR();
+  recog.lang=LANG;
+  recog.interimResults=false;
+  recog.continuous=true;
+  recog.onresult=e=>{
+    const r=e.results[e.resultIndex];
+    if(!r||!r[0])return;
+    const t=r[0].transcript.trim();
+    if(!t) return;
+    texto=t.toUpperCase();
+    renderText(texto);
+  };
+  recog.onend=()=>{ if(listening){ try{recog.start();}catch(_){} } };
+}
+
+function startMic(){
+  if(listening) return;
+  // pide micrófono una sola vez — reutiliza el stream para voz Y espectrograma
+  navigator.mediaDevices.getUserMedia({audio:true,video:false})
+    .then(stream=>{
+      initAudio(stream);   // conecta al analyser
+      if(recog){ recog.start(); listening=true; }
+    })
+    .catch(e=>console.warn("Mic:", e));
+}
+
+/* ── Espectrograma ── */
+function updateSpectrogram(){
+  if(!analyser) return;
+  analyser.getByteFrequencyData(freqData);
+  const bins=freqData.length;
+  const x=specHead;
+  specCtx2d.fillStyle='#000';
+  specCtx2d.fillRect(x,0,COL_W+1,height);
+  for(let i=0;i<bins;i++){
+    const v=freqData[i]/255;
+    if(v<0.015) continue;
+    const freq_t=i/bins;
+    const y=height-(freq_t*height);
+    const h=(height/bins)+1;
+    const hue=35+freq_t*150;
+    const lig=10+v*68;
+    const alpha=0.25+v*0.65;
+    specCtx2d.fillStyle=`hsla(${hue},90%,${lig}%,${alpha})`;
+    specCtx2d.fillRect(x,y,COL_W,h);
+  }
+  specHead=(specHead+COL_W)%width;
+}
+
+/* ── Partículas ── */
+function renderText(t){
+  pg.clear();
+  pg.push();
+  pg.textAlign(CENTER,CENTER);
+  pg.textSize(TEXT_SIZE);
+  pg.textStyle(BOLD);
+  pg.fill(255); pg.noStroke();
+  pg.translate(width/2,height/2);
+  pg.text(t,0,0);
+  pg.pop();
+  pg.loadPixels();
+  const targets=[];
+  for(let y=0;y<height;y+=STEP){
+    for(let x=0;x<width;x+=STEP){
+      const i=4*(y*width+x);
+      if(pg.pixels[i+3]>128) targets.push(createVector(x,y));
+    }
+  }
+  const total=min(MAX_PARTS,targets.length);
+  while(parts.length<total) parts.push(newPart(random(width),random(height)));
+  if(parts.length>total) parts.length=total;
+  shuffle(targets,true);
+  for(let i=0;i<parts.length;i++) parts[i].target=targets[i].copy();
+}
+
+function newPart(x,y){
+  return {pos:createVector(x,y),
+          vel:p5.Vector.random2D().mult(random(2)),
+          acc:createVector(0,0),
+          target:createVector(x,y),
+          maxSpeed:8,maxForce:0.6,
+          r:2+random(1.5)};
+}
+
+function draw(){
+  updateSpectrogram();
+
+  // fondo: espectrograma con scroll
+  const x0=specHead;
+  drawingContext.drawImage(specBuf, x0,0,width-x0,height, 0,0,width-x0,height);
+  if(x0>0) drawingContext.drawImage(specBuf, 0,0,x0,height, width-x0,0,x0,height);
+
+  // velo
+  noStroke(); fill(0,60); rect(0,0,width,height);
+
+  // partículas
+  const tt=millis()*0.0004;
+  for(const p of parts){
+    const desired=p5.Vector.sub(p.target,p.pos);
+    const d=desired.mag();
+    desired.setMag(d<60?map(d,0,60,0,p.maxSpeed):p.maxSpeed);
+    const steer=p5.Vector.sub(desired,p.vel).limit(p.maxForce);
+    const n=noise(p.pos.x*0.005,p.pos.y*0.005,tt);
+    const flow=p5.Vector.fromAngle(map(n,0,1,-PI,PI)).mult(0.15);
+    p.acc.set(0,0);
+    p.acc.add(steer).add(flow);
+    p.vel.add(p.acc).limit(p.maxSpeed);
+    p.pos.add(p.vel);
+    fill(255,constrain(map(d,0,120,255,40),40,255));
+    circle(p.pos.x,p.pos.y,p.r);
+  }
+}
+</script>
+</body>
+</html>
