@@ -17,13 +17,11 @@ const LANG="es-ES";
 const TEXT_SIZE=180;
 const STEP=6;
 const MAX_PARTS=1200;
-const FFT_SIZE=2048;
-const COL_W=2;
 
 let recog, listening=false, texto="DI UNA PALABRA";
 let parts=[], pg;
 
-// espectrograma
+// espectrograma — variables adicionales únicamente
 let audioCtx, analyser, freqData;
 let specBuf, specCtx2d, specHead=0;
 
@@ -32,6 +30,7 @@ function setup(){
   pixelDensity(1);
   pg=createGraphics(width,height); pg.pixelDensity(1);
 
+  // canvas offscreen para espectrograma
   specBuf=document.createElement('canvas');
   specBuf.width=width; specBuf.height=height;
   specCtx2d=specBuf.getContext('2d');
@@ -42,7 +41,7 @@ function setup(){
   renderText(texto);
   initSpeech();
 
-  // igual que el original: intenta al inicio, clic como fallback
+  // === IGUAL QUE EL ORIGINAL ===
   try{ startMic(); }catch(_){}
   window.addEventListener('pointerdown', ()=>startMic(), {once:true});
 }
@@ -57,7 +56,7 @@ function windowResized(){
   renderText(texto);
 }
 
-/* ── Voz (igual que el original) ── */
+/* -------- Voz — IGUAL QUE EL ORIGINAL -------- */
 function initSpeech(){
   const SR=window.webkitSpeechRecognition || window.SpeechRecognition;
   if(!SR) return;
@@ -75,49 +74,24 @@ function initSpeech(){
   };
   recog.onend=()=>{ if(listening){ try{recog.start();}catch(_){} } };
 }
-
-// igual que el original — SpeechRecognition maneja su propio micro
 function startMic(){
   if(recog && !listening){ recog.start(); listening=true; }
-  // stream separado solo para FFT, no interfiere con SpeechRecognition
+  // espectrograma: stream de audio separado, falla en silencio si no hay micro
   if(!audioCtx){
     navigator.mediaDevices.getUserMedia({audio:true,video:false})
       .then(stream=>{
         audioCtx=new (window.AudioContext||window.webkitAudioContext)();
         analyser=audioCtx.createAnalyser();
-        analyser.fftSize=FFT_SIZE;
+        analyser.fftSize=2048;
         analyser.smoothingTimeConstant=0.8;
         freqData=new Uint8Array(analyser.frequencyBinCount);
         audioCtx.createMediaStreamSource(stream).connect(analyser);
       })
-      .catch(()=>{}); // si no hay micro, el espectrograma queda en negro, el resto funciona igual
+      .catch(()=>{});
   }
 }
 
-/* ── Espectrograma ── */
-function updateSpectrogram(){
-  if(!analyser) return;
-  analyser.getByteFrequencyData(freqData);
-  const bins=freqData.length;
-  const x=specHead;
-  specCtx2d.fillStyle='#000';
-  specCtx2d.fillRect(x,0,COL_W+1,height);
-  for(let i=0;i<bins;i++){
-    const v=freqData[i]/255;
-    if(v<0.015) continue;
-    const freq_t=i/bins;
-    const y=height-(freq_t*height);
-    const h=(height/bins)+1;
-    const hue=35+freq_t*150;
-    const lig=10+v*68;
-    const alpha=0.25+v*0.65;
-    specCtx2d.fillStyle=`hsla(${hue},90%,${lig}%,${alpha})`;
-    specCtx2d.fillRect(x,y,COL_W,h);
-  }
-  specHead=(specHead+COL_W)%width;
-}
-
-/* ── Partículas (igual que el original) ── */
+/* -------- Partículas — IGUAL QUE EL ORIGINAL -------- */
 function renderText(t){
   pg.clear();
   pg.push();
@@ -142,7 +116,6 @@ function renderText(t){
   shuffle(targets,true);
   for(let i=0;i<parts.length;i++) parts[i].target=targets[i].copy();
 }
-
 function newPart(x,y){
   return {pos:createVector(x,y),
           vel:p5.Vector.random2D().mult(random(2)),
@@ -152,17 +125,36 @@ function newPart(x,y){
           r:2+random(1.5)};
 }
 
-function draw(){
-  // espectrograma de fondo
-  updateSpectrogram();
+/* -------- Espectrograma -------- */
+function drawSpectrogram(){
+  if(!analyser) return;
+  analyser.getByteFrequencyData(freqData);
+  const bins=freqData.length;
+  const x=specHead;
+  specCtx2d.fillStyle='#000';
+  specCtx2d.fillRect(x,0,3,height);
+  for(let i=0;i<bins;i++){
+    const v=freqData[i]/255;
+    if(v<0.015) continue;
+    const freq_t=i/bins;
+    const y=height-(freq_t*height);
+    const h=(height/bins)+1;
+    const hue=35+freq_t*150;
+    specCtx2d.fillStyle=`hsla(${hue},90%,${10+v*68}%,${0.25+v*0.65})`;
+    specCtx2d.fillRect(x,y,2,h);
+  }
+  specHead=(specHead+2)%width;
+  // dibuja en p5 canvas con scroll
   const x0=specHead;
   drawingContext.drawImage(specBuf, x0,0,width-x0,height, 0,0,width-x0,height);
   if(x0>0) drawingContext.drawImage(specBuf, 0,0,x0,height, width-x0,0,x0,height);
+}
 
-  // velo
-  noStroke(); fill(0,60); rect(0,0,width,height);
-
-  // partículas
+/* -------- Draw — original + espectrograma de fondo -------- */
+function draw(){
+  background(0,40);
+  drawSpectrogram();
+  noStroke();
   const tt=millis()*0.0004;
   for(const p of parts){
     const desired=p5.Vector.sub(p.target,p.pos);
