@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width,initial-scale=1" />
-<title>Voz → Partículas + Espectrograma</title>
+<title>Voz → Partículas</title>
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden}
   canvas.p5Canvas{position:fixed;inset:0;display:block}
@@ -22,6 +22,8 @@ const COL_W=2;
 
 let recog, listening=false, texto="DI UNA PALABRA";
 let parts=[], pg;
+
+// espectrograma
 let audioCtx, analyser, freqData;
 let specBuf, specCtx2d, specHead=0;
 
@@ -40,6 +42,7 @@ function setup(){
   renderText(texto);
   initSpeech();
 
+  // igual que el original: intenta al inicio, clic como fallback
   try{ startMic(); }catch(_){}
   window.addEventListener('pointerdown', ()=>startMic(), {once:true});
 }
@@ -54,20 +57,9 @@ function windowResized(){
   renderText(texto);
 }
 
-/* ── Audio para espectrograma (mismo stream del micrófono) ── */
-function initAudio(stream){
-  if(audioCtx) return;
-  audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-  analyser=audioCtx.createAnalyser();
-  analyser.fftSize=FFT_SIZE;
-  analyser.smoothingTimeConstant=0.8;
-  freqData=new Uint8Array(analyser.frequencyBinCount);
-  audioCtx.createMediaStreamSource(stream).connect(analyser);
-}
-
-/* ── Speech ── */
+/* ── Voz (igual que el original) ── */
 function initSpeech(){
-  const SR=window.webkitSpeechRecognition||window.SpeechRecognition;
+  const SR=window.webkitSpeechRecognition || window.SpeechRecognition;
   if(!SR) return;
   recog=new SR();
   recog.lang=LANG;
@@ -84,15 +76,22 @@ function initSpeech(){
   recog.onend=()=>{ if(listening){ try{recog.start();}catch(_){} } };
 }
 
+// igual que el original — SpeechRecognition maneja su propio micro
 function startMic(){
-  if(listening) return;
-  // pide micrófono una sola vez — reutiliza el stream para voz Y espectrograma
-  navigator.mediaDevices.getUserMedia({audio:true,video:false})
-    .then(stream=>{
-      initAudio(stream);   // conecta al analyser
-      if(recog){ recog.start(); listening=true; }
-    })
-    .catch(e=>console.warn("Mic:", e));
+  if(recog && !listening){ recog.start(); listening=true; }
+  // stream separado solo para FFT, no interfiere con SpeechRecognition
+  if(!audioCtx){
+    navigator.mediaDevices.getUserMedia({audio:true,video:false})
+      .then(stream=>{
+        audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+        analyser=audioCtx.createAnalyser();
+        analyser.fftSize=FFT_SIZE;
+        analyser.smoothingTimeConstant=0.8;
+        freqData=new Uint8Array(analyser.frequencyBinCount);
+        audioCtx.createMediaStreamSource(stream).connect(analyser);
+      })
+      .catch(()=>{}); // si no hay micro, el espectrograma queda en negro, el resto funciona igual
+  }
 }
 
 /* ── Espectrograma ── */
@@ -118,7 +117,7 @@ function updateSpectrogram(){
   specHead=(specHead+COL_W)%width;
 }
 
-/* ── Partículas ── */
+/* ── Partículas (igual que el original) ── */
 function renderText(t){
   pg.clear();
   pg.push();
@@ -137,7 +136,7 @@ function renderText(t){
       if(pg.pixels[i+3]>128) targets.push(createVector(x,y));
     }
   }
-  const total=min(MAX_PARTS,targets.length);
+  const total=min(MAX_PARTS, targets.length);
   while(parts.length<total) parts.push(newPart(random(width),random(height)));
   if(parts.length>total) parts.length=total;
   shuffle(targets,true);
@@ -154,9 +153,8 @@ function newPart(x,y){
 }
 
 function draw(){
+  // espectrograma de fondo
   updateSpectrogram();
-
-  // fondo: espectrograma con scroll
   const x0=specHead;
   drawingContext.drawImage(specBuf, x0,0,width-x0,height, 0,0,width-x0,height);
   if(x0>0) drawingContext.drawImage(specBuf, 0,0,x0,height, width-x0,0,x0,height);
@@ -177,7 +175,7 @@ function draw(){
     p.acc.add(steer).add(flow);
     p.vel.add(p.acc).limit(p.maxSpeed);
     p.pos.add(p.vel);
-    fill(255,constrain(map(d,0,120,255,40),40,255));
+    fill(255, constrain(map(d,0,120,255,40),40,255));
     circle(p.pos.x,p.pos.y,p.r);
   }
 }
