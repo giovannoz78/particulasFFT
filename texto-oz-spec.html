@@ -19,23 +19,26 @@ const MAX_PARTS=1200;
 
 let recog, listening=false, texto="DI UNA PALABRA";
 let parts=[], pg;
-
 let audioCtx, analyser, freqData;
 let specBuf, specCtx2d, specHead=0;
 
-// calcula el tamaño de texto para que quepa en pantalla
-function fitTextSize(t){
-  pg.textStyle(BOLD);
-  let size=200;
-  pg.textSize(size);
-  while(pg.textWidth(t) > width*0.92 && size > 20) size -= 4;
-  return size;
+// mide con canvas nativo — funciona en iOS
+const ruler = document.createElement('canvas').getContext('2d');
+function calcTextSize(t){
+  let sz = 180;
+  ruler.font = `bold ${sz}px sans-serif`;
+  while(ruler.measureText(t).width > windowWidth * 0.90 && sz > 16){
+    sz -= 4;
+    ruler.font = `bold ${sz}px sans-serif`;
+  }
+  return sz;
 }
 
 function setup(){
   createCanvas(windowWidth, windowHeight).addClass('p5Canvas');
   pixelDensity(1);
-  pg=createGraphics(width,height); pg.pixelDensity(1);
+  pg=createGraphics(width,height);
+  pg.pixelDensity(1);
 
   specBuf=document.createElement('canvas');
   specBuf.width=width; specBuf.height=height;
@@ -46,14 +49,14 @@ function setup(){
   background(0);
   renderText(texto);
   initSpeech();
-
   try{ startMic(); }catch(_){}
   window.addEventListener('pointerdown', ()=>startMic(), {once:true});
 }
 
 function windowResized(){
   resizeCanvas(windowWidth, windowHeight);
-  pg=createGraphics(width,height); pg.pixelDensity(1);
+  pg=createGraphics(width,height);
+  pg.pixelDensity(1);
   specBuf.width=width; specBuf.height=height;
   specCtx2d.fillStyle='#000';
   specCtx2d.fillRect(0,0,width,height);
@@ -96,15 +99,15 @@ function startMic(){
 }
 
 function renderText(t){
+  const sz = calcTextSize(t);
   pg.clear();
   pg.push();
   pg.textAlign(CENTER,CENTER);
   pg.textStyle(BOLD);
-  const sz=fitTextSize(t);
   pg.textSize(sz);
   pg.fill(255); pg.noStroke();
-  pg.translate(width/2,height/2);
-  pg.text(t,0,0);
+  pg.translate(width/2, height/2);
+  pg.text(t, 0, 0);
   pg.pop();
   pg.loadPixels();
   const targets=[];
