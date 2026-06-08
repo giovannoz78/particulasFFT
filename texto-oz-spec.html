@@ -7,173 +7,258 @@
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden}
   canvas.p5Canvas{position:fixed;inset:0;display:block}
-  #ui,#msg,#out{display:none !important}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.3/p5.min.js"></script>
 </head>
 <body>
 <script>
-const LANG="es-ES";
-const STEP=6;
-const MAX_PARTS=1200;
+const LANG      = "es-ES";
+const STEP      = 6;
+const MAX_PARTS = 1200;
 
-let recog, listening=false, texto="DI UNA PALABRA";
-let parts=[], pg;
+let recog, listening = false, texto = "DI UNA PALABRA";
+let parts = [], pg;
 let audioCtx, analyser, freqData;
-let specBuf, specCtx2d, specHead=0;
 
-// mide con canvas nativo — funciona en iOS
+// ── espectrograma ──────────────────────────────────────────────────────────
+let specBuf, specCtx2d, specHead = 0;
+
+// Palette de colores del espectrograma (hsla → guardamos como [h,s,l,a])
+// La leemos pixel a pixel para dársela a las partículas
+// Usamos un ImageData auxiliar para samplear
+
 const ruler = document.createElement('canvas').getContext('2d');
-function calcTextSize(t){
+function calcTextSize(t) {
   let sz = 180;
   ruler.font = `bold ${sz}px sans-serif`;
-  while(ruler.measureText(t).width > windowWidth * 0.90 && sz > 16){
+  while (ruler.measureText(t).width > windowWidth * 0.90 && sz > 16) {
     sz -= 4;
     ruler.font = `bold ${sz}px sans-serif`;
   }
   return sz;
 }
 
-function setup(){
+// ── setup ──────────────────────────────────────────────────────────────────
+function setup() {
   createCanvas(windowWidth, windowHeight).addClass('p5Canvas');
   pixelDensity(1);
-  pg=createGraphics(width,height);
+
+  pg = createGraphics(width, height);
   pg.pixelDensity(1);
 
-  specBuf=document.createElement('canvas');
-  specBuf.width=width; specBuf.height=height;
-  specCtx2d=specBuf.getContext('2d');
-  specCtx2d.fillStyle='#000';
-  specCtx2d.fillRect(0,0,width,height);
+  specBuf        = document.createElement('canvas');
+  specBuf.width  = width;
+  specBuf.height = height;
+  specCtx2d      = specBuf.getContext('2d');
+  specCtx2d.fillStyle = '#000';
+  specCtx2d.fillRect(0, 0, width, height);
 
   background(0);
   renderText(texto);
   initSpeech();
-  try{ startMic(); }catch(_){}
-  window.addEventListener('pointerdown', ()=>startMic(), {once:true});
+  try { startMic(); } catch (_) {}
+  window.addEventListener('pointerdown', () => startMic(), { once: true });
 }
 
-function windowResized(){
+function windowResized() {
   resizeCanvas(windowWidth, windowHeight);
-  pg=createGraphics(width,height);
+  pg = createGraphics(width, height);
   pg.pixelDensity(1);
-  specBuf.width=width; specBuf.height=height;
-  specCtx2d.fillStyle='#000';
-  specCtx2d.fillRect(0,0,width,height);
-  specHead=0;
+  specBuf.width  = width;
+  specBuf.height = height;
+  specCtx2d.fillStyle = '#000';
+  specCtx2d.fillRect(0, 0, width, height);
+  specHead = 0;
   renderText(texto);
 }
 
-function initSpeech(){
-  const SR=window.webkitSpeechRecognition || window.SpeechRecognition;
-  if(!SR) return;
-  recog=new SR();
-  recog.lang=LANG;
-  recog.interimResults=false;
-  recog.continuous=true;
-  recog.onresult=e=>{
-    const r=e.results[e.resultIndex];
-    if(!r||!r[0])return;
-    const t=r[0].transcript.trim();
-    if(!t) return;
-    texto=t.toUpperCase();
+// ── speech ─────────────────────────────────────────────────────────────────
+function initSpeech() {
+  const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
+  if (!SR) return;
+  recog = new SR();
+  recog.lang            = LANG;
+  recog.interimResults  = false;
+  recog.continuous      = true;
+  recog.onresult = e => {
+    const r = e.results[e.resultIndex];
+    if (!r || !r[0]) return;
+    const t = r[0].transcript.trim();
+    if (!t) return;
+    texto = t.toUpperCase();
     renderText(texto);
   };
-  recog.onend=()=>{ if(listening){ try{recog.start();}catch(_){} } };
+  recog.onend = () => { if (listening) { try { recog.start(); } catch (_) {} } };
 }
 
-function startMic(){
-  if(recog && !listening){ recog.start(); listening=true; }
-  if(!audioCtx){
-    navigator.mediaDevices.getUserMedia({audio:true,video:false})
-      .then(stream=>{
-        audioCtx=new (window.AudioContext||window.webkitAudioContext)();
-        analyser=audioCtx.createAnalyser();
-        analyser.fftSize=2048;
-        analyser.smoothingTimeConstant=0.8;
-        freqData=new Uint8Array(analyser.frequencyBinCount);
+function startMic() {
+  if (recog && !listening) { recog.start(); listening = true; }
+  if (!audioCtx) {
+    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
+      .then(stream => {
+        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        analyser = audioCtx.createAnalyser();
+        analyser.fftSize                = 2048;
+        analyser.smoothingTimeConstant  = 0.8;
+        freqData = new Uint8Array(analyser.frequencyBinCount);
         audioCtx.createMediaStreamSource(stream).connect(analyser);
       })
-      .catch(()=>{});
+      .catch(() => {});
   }
 }
 
-function renderText(t){
+// ── renderText ─────────────────────────────────────────────────────────────
+function renderText(t) {
   const sz = calcTextSize(t);
   pg.clear();
   pg.push();
-  pg.textAlign(CENTER,CENTER);
+  pg.textAlign(CENTER, CENTER);
   pg.textStyle(BOLD);
   pg.textSize(sz);
   pg.fill(255); pg.noStroke();
-  pg.translate(width/2, height/2);
+  pg.translate(width / 2, height / 2);
   pg.text(t, 0, 0);
   pg.pop();
   pg.loadPixels();
-  const targets=[];
-  for(let y=0;y<height;y+=STEP){
-    for(let x=0;x<width;x+=STEP){
-      const i=4*(y*width+x);
-      if(pg.pixels[i+3]>128) targets.push(createVector(x,y));
+
+  const targets = [];
+  for (let y = 0; y < height; y += STEP) {
+    for (let x = 0; x < width; x += STEP) {
+      const i = 4 * (y * width + x);
+      if (pg.pixels[i + 3] > 128) targets.push(createVector(x, y));
     }
   }
-  const total=min(MAX_PARTS, targets.length);
-  while(parts.length<total) parts.push(newPart(random(width),random(height)));
-  if(parts.length>total) parts.length=total;
-  shuffle(targets,true);
-  for(let i=0;i<parts.length;i++) parts[i].target=targets[i].copy();
+
+  const total = min(MAX_PARTS, targets.length);
+  while (parts.length < total) parts.push(newPart(random(width), random(height)));
+  if (parts.length > total) parts.length = total;
+  shuffle(targets, true);
+  for (let i = 0; i < parts.length; i++) parts[i].target = targets[i].copy();
 }
 
-function newPart(x,y){
-  return {pos:createVector(x,y),
-          vel:p5.Vector.random2D().mult(random(2)),
-          acc:createVector(0,0),
-          target:createVector(x,y),
-          maxSpeed:8,maxForce:0.6,
-          r:2+random(1.5)};
+function newPart(x, y) {
+  return {
+    pos:      createVector(x, y),
+    vel:      p5.Vector.random2D().mult(random(2)),
+    acc:      createVector(0, 0),
+    target:   createVector(x, y),
+    maxSpeed: 8,
+    maxForce: 0.6,
+    r:        2 + random(1.5),
+    // color actual (interpolado suavemente)
+    cr: 255, cg: 255, cb: 255, ca: 255
+  };
 }
 
-function drawSpectrogram(){
-  if(!analyser) return;
+// ── samplea el color del espectrograma en (px, py) ─────────────────────────
+// Dado que specBuf es un canvas2d nativo, usamos getImageData de una región 1×1
+// Para evitar el coste de getImageData por partícula, construimos un
+// snapshot del frame actual una vez por draw()
+let specSnap = null;
+
+function snapshotSpec() {
+  // snapshot de ancho completo, 1 fila cada STEP píxeles — demasiado caro
+  // Mejor: snapshot completo una vez
+  specSnap = specCtx2d.getImageData(0, 0, width, height);
+}
+
+function sampleSpecColor(px, py) {
+  if (!specSnap) return [255, 255, 255];
+  // coordenada circular (el espectrograma scrollea)
+  const sx = floor(px) % width;
+  const sy = floor(constrain(py, 0, height - 1));
+  const idx = 4 * (sy * width + sx);
+  const r   = specSnap.data[idx];
+  const g   = specSnap.data[idx + 1];
+  const b   = specSnap.data[idx + 2];
+  return [r, g, b];
+}
+
+// ── espectrograma ──────────────────────────────────────────────────────────
+function drawSpectrogram() {
+  if (!analyser) return;
   analyser.getByteFrequencyData(freqData);
-  const bins=freqData.length;
-  const x=specHead;
-  specCtx2d.fillStyle='#000';
-  specCtx2d.fillRect(x,0,3,height);
-  for(let i=0;i<bins;i++){
-    const v=freqData[i]/255;
-    if(v<0.015) continue;
-    const freq_t=i/bins;
-    const y=height-(freq_t*height);
-    const h=(height/bins)+1;
-    const hue=35+freq_t*150;
-    specCtx2d.fillStyle=`hsla(${hue},90%,${10+v*68}%,${0.25+v*0.65})`;
-    specCtx2d.fillRect(x,y,2,h);
+  const bins = freqData.length;
+  const x    = specHead;
+
+  specCtx2d.fillStyle = '#000';
+  specCtx2d.fillRect(x, 0, 3, height);
+
+  for (let i = 0; i < bins; i++) {
+    const v      = freqData[i] / 255;
+    if (v < 0.015) continue;
+    const freq_t = i / bins;
+    const y      = height - (freq_t * height);
+    const h_px   = (height / bins) + 1;
+    const hue    = 35 + freq_t * 150;
+    specCtx2d.fillStyle = `hsla(${hue},90%,${10 + v * 68}%,${0.25 + v * 0.65})`;
+    specCtx2d.fillRect(x, y, 2, h_px);
   }
-  specHead=(specHead+2)%width;
-  const x0=specHead;
-  drawingContext.drawImage(specBuf, x0,0,width-x0,height, 0,0,width-x0,height);
-  if(x0>0) drawingContext.drawImage(specBuf, 0,0,x0,height, width-x0,0,x0,height);
+  specHead = (specHead + 2) % width;
 }
 
-function draw(){
-  background(0,40);
+function blitSpectrogram() {
+  const x0 = specHead;
+  drawingContext.drawImage(specBuf, x0, 0, width - x0, height,      0,      0, width - x0, height);
+  if (x0 > 0)
+    drawingContext.drawImage(specBuf, 0,  0, x0,        height, width - x0, 0, x0,         height);
+}
+
+// ── draw ───────────────────────────────────────────────────────────────────
+function draw() {
+  background(0, 40);
+
+  // 1. actualizar espectrograma (escribe en specBuf)
   drawSpectrogram();
+
+  // 2. blit specBuf al canvas p5 (detrás de las partículas)
+  blitSpectrogram();
+
+  // 3. snapshot del specBuf para samplear colores
+  snapshotSpec();
+
+  // 4. partículas con color del espectrograma
   noStroke();
-  const tt=millis()*0.0004;
-  for(const p of parts){
-    const desired=p5.Vector.sub(p.target,p.pos);
-    const d=desired.mag();
-    desired.setMag(d<60?map(d,0,60,0,p.maxSpeed):p.maxSpeed);
-    const steer=p5.Vector.sub(desired,p.vel).limit(p.maxForce);
-    const n=noise(p.pos.x*0.005,p.pos.y*0.005,tt);
-    const flow=p5.Vector.fromAngle(map(n,0,1,-PI,PI)).mult(0.15);
-    p.acc.set(0,0);
+  const tt = millis() * 0.0004;
+
+  for (const p of parts) {
+    const desired = p5.Vector.sub(p.target, p.pos);
+    const d       = desired.mag();
+    desired.setMag(d < 60 ? map(d, 0, 60, 0, p.maxSpeed) : p.maxSpeed);
+    const steer = p5.Vector.sub(desired, p.vel).limit(p.maxForce);
+    const n     = noise(p.pos.x * 0.005, p.pos.y * 0.005, tt);
+    const flow  = p5.Vector.fromAngle(map(n, 0, 1, -PI, PI)).mult(0.15);
+
+    p.acc.set(0, 0);
     p.acc.add(steer).add(flow);
     p.vel.add(p.acc).limit(p.maxSpeed);
     p.pos.add(p.vel);
-    fill(255, constrain(map(d,0,120,255,40),40,255));
-    circle(p.pos.x,p.pos.y,p.r);
+
+    // samplear color del espectrograma en la posición actual de la partícula
+    const [sr, sg, sb] = sampleSpecColor(p.pos.x, p.pos.y);
+
+    // si el espectrograma está oscuro en ese punto → blanco suave
+    const brightness = (sr + sg + sb) / 3;
+    let tr, tg, tb;
+    if (brightness < 12) {
+      // zona oscura: partícula blanca tenue
+      tr = 200; tg = 200; tb = 200;
+    } else {
+      // zona con color: usamos el color del espectro, saturado
+      tr = sr; tg = sg; tb = sb;
+    }
+
+    // lerp suave hacia el color objetivo
+    const lerpF = 0.12;
+    p.cr = lerp(p.cr, tr, lerpF);
+    p.cg = lerp(p.cg, tg, lerpF);
+    p.cb = lerp(p.cb, tb, lerpF);
+
+    // alpha: más cerca del target → más opaco
+    const alpha = constrain(map(d, 0, 120, 255, 60), 60, 255);
+
+    fill(p.cr, p.cg, p.cb, alpha);
+    circle(p.pos.x, p.pos.y, p.r * 2);
   }
 }
 </script>
