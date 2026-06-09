@@ -150,20 +150,26 @@ function hslToRgb(h, s, l) {
   return [f(0) * 255, f(8) * 255, f(4) * 255];
 }
 
-// Color del espectrograma para una posición y dada (mismo cálculo que drawSpectrogram)
-// freq_t: 0 = baja frecuencia (fondo), 1 = alta frecuencia (arriba)
-function specColorAtY(py) {
+// Color global: promedio ponderado por energía de todas las bandas activas
+function calcGlobalColor() {
   if (!freqData) return null;
-  // invertido: y=height → freq_t=0, y=0 → freq_t=1
-  const freq_t = 1 - (py / height);
-  const binIdx = floor(freq_t * freqData.length);
-  const v      = freqData[constrain(binIdx, 0, freqData.length - 1)] / 255;
-  if (v < 0.015) return null;
-  const hue = 35 + freq_t * 150;
-  const lum = 40 + v * 55;
-  const sat = 90;
-  const [r, g, b] = hslToRgb(hue, sat, lum);
-  return [r, g, b, v];
+  let totalW = 0, sumH = 0, sumV = 0;
+  const bins = freqData.length;
+  for (let i = 0; i < bins; i++) {
+    const v = freqData[i] / 255;
+    if (v < 0.015) continue;
+    const freq_t = i / bins;
+    const hue    = 35 + freq_t * 150;
+    sumH  += hue * v;
+    sumV  += v;
+    totalW += v;
+  }
+  if (totalW < 0.5) return null;          // muy poco audio
+  const hue = sumH / totalW;
+  const v   = sumV / bins;               // energía normalizada
+  const lum = 45 + v * 400;             // amplificado para que sea visible
+  const [r, g, b] = hslToRgb(hue, 90, Math.min(lum, 85));
+  return [r, g, b];
 }
 
 function drawSpectrogram() {
@@ -201,7 +207,8 @@ function draw() {
   blitSpectrogram();
 
   noStroke();
-  const tt = millis() * 0.0004;
+  const tt  = millis() * 0.0004;
+  const col = calcGlobalColor();   // un color por frame para todas las partículas
 
   for (const p of parts) {
     const desired = p5.Vector.sub(p.target, p.pos);
@@ -216,23 +223,19 @@ function draw() {
     p.vel.add(p.acc).limit(p.maxSpeed);
     p.pos.add(p.vel);
 
-    // Color directo desde freqData según posición y de la partícula
-    const col = specColorAtY(p.pos.y);
-    const lerpF = 0.10;
-
+    const lerpF = 0.08;
     if (col) {
-      // hay energía en esa banda → color del espectro
       p.cr = lerp(p.cr, col[0], lerpF);
       p.cg = lerp(p.cg, col[1], lerpF);
       p.cb = lerp(p.cb, col[2], lerpF);
     } else {
-      // silencio → blanco tenue
-      p.cr = lerp(p.cr, 30, lerpF * 0.3);
-      p.cg = lerp(p.cg, 30, lerpF * 0.3);
-      p.cb = lerp(p.cb, 30, lerpF * 0.3);
+      // sin audio → oscuro, casi negro
+      p.cr = lerp(p.cr, 25, lerpF * 0.2);
+      p.cg = lerp(p.cg, 25, lerpF * 0.2);
+      p.cb = lerp(p.cb, 25, lerpF * 0.2);
     }
 
-    const alpha = constrain(map(d, 0, 120, 255, 60), 60, 255);
+    const alpha = constrain(map(d, 0, 120, 255, 80), 80, 255);
     fill(p.cr, p.cg, p.cb, alpha);
     circle(p.pos.x, p.pos.y, p.r);
   }
