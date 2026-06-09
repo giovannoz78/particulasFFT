@@ -141,35 +141,19 @@ function newPart(x, y) {
   };
 }
 
-// Convierte HSL → RGB (0-255)
-function hslToRgb(h, s, l) {
-  s /= 100; l /= 100;
-  const k = n => (n + h / 30) % 12;
-  const a = s * Math.min(l, 1 - l);
-  const f = n => l - a * Math.max(-1, Math.min(k(n) - 3, Math.min(9 - k(n), 1)));
-  return [f(0) * 255, f(8) * 255, f(4) * 255];
+// columna de pixels de la franja más reciente del espectrograma
+let specColumn = null;
+
+function readSpecColumn() {
+  const x  = (specHead - 2 + width) % width;
+  specColumn = specCtx2d.getImageData(x, 0, 1, height).data;
 }
 
-// Color global: promedio ponderado por energía de todas las bandas activas
-function calcGlobalColor() {
-  if (!freqData) return null;
-  let totalW = 0, sumH = 0, sumV = 0;
-  const bins = freqData.length;
-  for (let i = 0; i < bins; i++) {
-    const v = freqData[i] / 255;
-    if (v < 0.015) continue;
-    const freq_t = i / bins;
-    const hue    = 35 + freq_t * 150;
-    sumH  += hue * v;
-    sumV  += v;
-    totalW += v;
-  }
-  if (totalW < 0.5) return null;          // muy poco audio
-  const hue = sumH / totalW;
-  const v   = sumV / bins;               // energía normalizada
-  const lum = 45 + v * 400;             // amplificado para que sea visible
-  const [r, g, b] = hslToRgb(hue, 90, Math.min(lum, 85));
-  return [r, g, b];
+function specPixelAt(py) {
+  if (!specColumn) return null;
+  const y   = Math.max(0, Math.min(height - 1, Math.floor(py)));
+  const idx = y * 4;
+  return [specColumn[idx], specColumn[idx + 1], specColumn[idx + 2]];
 }
 
 function drawSpectrogram() {
@@ -205,10 +189,10 @@ function draw() {
   background(0, 40);
   drawSpectrogram();
   blitSpectrogram();
+  readSpecColumn();   // lee la columna recién pintada — un solo getImageData por frame
 
   noStroke();
-  const tt  = millis() * 0.0004;
-  const col = calcGlobalColor();   // un color por frame para todas las partículas
+  const tt = millis() * 0.0004;
 
   for (const p of parts) {
     const desired = p5.Vector.sub(p.target, p.pos);
@@ -223,16 +207,19 @@ function draw() {
     p.vel.add(p.acc).limit(p.maxSpeed);
     p.pos.add(p.vel);
 
+    const px  = specPixelAt(p.pos.y);
     const lerpF = 0.08;
-    if (col) {
-      p.cr = lerp(p.cr, col[0], lerpF);
-      p.cg = lerp(p.cg, col[1], lerpF);
-      p.cb = lerp(p.cb, col[2], lerpF);
+
+    if (px && (px[0] + px[1] + px[2]) > 15) {
+      // pixel con color real del espectrograma
+      p.cr = lerp(p.cr, px[0], lerpF);
+      p.cg = lerp(p.cg, px[1], lerpF);
+      p.cb = lerp(p.cb, px[2], lerpF);
     } else {
-      // sin audio → oscuro, casi negro
-      p.cr = lerp(p.cr, 25, lerpF * 0.2);
-      p.cg = lerp(p.cg, 25, lerpF * 0.2);
-      p.cb = lerp(p.cb, 25, lerpF * 0.2);
+      // sin audio en esa banda → decae a negro
+      p.cr = lerp(p.cr, 0, lerpF * 0.15);
+      p.cg = lerp(p.cg, 0, lerpF * 0.15);
+      p.cb = lerp(p.cb, 0, lerpF * 0.15);
     }
 
     const alpha = constrain(map(d, 0, 120, 255, 80), 80, 255);
