@@ -7,224 +7,173 @@
 <style>
   html,body{margin:0;height:100%;background:#000;overflow:hidden}
   canvas.p5Canvas{position:fixed;inset:0;display:block}
+  #ui,#msg,#out{display:none !important}
 </style>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/p5.js/1.9.3/p5.min.js"></script>
 </head>
 <body>
 <script>
-const LANG      = "es-ES";
-const STEP      = 6;
-const MAX_PARTS = 1200;
+const LANG="es-ES";
+const STEP=6;
+const MAX_PARTS=1200;
 
-let recog, listening = false, texto = "DI UNA PALABRA";
-let parts = [], pg;
+let recog, listening=false, texto="DI UNA PALABRA";
+let parts=[], pg;
 let audioCtx, analyser, freqData;
+let specBuf, specCtx2d, specHead=0;
 
-// espectrograma
-let specBuf, specCtx2d, specHead = 0;
-
+// mide con canvas nativo — funciona en iOS
 const ruler = document.createElement('canvas').getContext('2d');
-function calcTextSize(t) {
+function calcTextSize(t){
   let sz = 180;
   ruler.font = `bold ${sz}px sans-serif`;
-  while (ruler.measureText(t).width > windowWidth * 0.90 && sz > 16) {
+  while(ruler.measureText(t).width > windowWidth * 0.90 && sz > 16){
     sz -= 4;
     ruler.font = `bold ${sz}px sans-serif`;
   }
   return sz;
 }
 
-function setup() {
+function setup(){
   createCanvas(windowWidth, windowHeight).addClass('p5Canvas');
   pixelDensity(1);
-  pg = createGraphics(width, height);
+  pg=createGraphics(width,height);
   pg.pixelDensity(1);
 
-  specBuf        = document.createElement('canvas');
-  specBuf.width  = width;
-  specBuf.height = height;
-  specCtx2d      = specBuf.getContext('2d');
-  specCtx2d.fillStyle = '#000';
-  specCtx2d.fillRect(0, 0, width, height);
+  specBuf=document.createElement('canvas');
+  specBuf.width=width; specBuf.height=height;
+  specCtx2d=specBuf.getContext('2d');
+  specCtx2d.fillStyle='#000';
+  specCtx2d.fillRect(0,0,width,height);
 
   background(0);
   renderText(texto);
   initSpeech();
-  try { startMic(); } catch (_) {}
-  window.addEventListener('pointerdown', () => startMic(), { once: true });
+  try{ startMic(); }catch(_){}
+  window.addEventListener('pointerdown', ()=>startMic(), {once:true});
 }
 
-function windowResized() {
+function windowResized(){
   resizeCanvas(windowWidth, windowHeight);
-  pg = createGraphics(width, height);
+  pg=createGraphics(width,height);
   pg.pixelDensity(1);
-  specBuf.width  = width;
-  specBuf.height = height;
-  specCtx2d.fillStyle = '#000';
-  specCtx2d.fillRect(0, 0, width, height);
-  specHead = 0;
+  specBuf.width=width; specBuf.height=height;
+  specCtx2d.fillStyle='#000';
+  specCtx2d.fillRect(0,0,width,height);
+  specHead=0;
   renderText(texto);
 }
 
-function initSpeech() {
-  const SR = window.webkitSpeechRecognition || window.SpeechRecognition;
-  if (!SR) return;
-  recog = new SR();
-  recog.lang           = LANG;
-  recog.interimResults = false;
-  recog.continuous     = true;
-  recog.onresult = e => {
-    const r = e.results[e.resultIndex];
-    if (!r || !r[0]) return;
-    const t = r[0].transcript.trim();
-    if (!t) return;
-    texto = t.toUpperCase();
+function initSpeech(){
+  const SR=window.webkitSpeechRecognition || window.SpeechRecognition;
+  if(!SR) return;
+  recog=new SR();
+  recog.lang=LANG;
+  recog.interimResults=false;
+  recog.continuous=true;
+  recog.onresult=e=>{
+    const r=e.results[e.resultIndex];
+    if(!r||!r[0])return;
+    const t=r[0].transcript.trim();
+    if(!t) return;
+    texto=t.toUpperCase();
     renderText(texto);
   };
-  recog.onend = () => { if (listening) { try { recog.start(); } catch (_) {} } };
+  recog.onend=()=>{ if(listening){ try{recog.start();}catch(_){} } };
 }
 
-function startMic() {
-  if (recog && !listening) { recog.start(); listening = true; }
-  if (!audioCtx) {
-    navigator.mediaDevices.getUserMedia({ audio: true, video: false })
-      .then(stream => {
-        audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-        analyser = audioCtx.createAnalyser();
-        analyser.fftSize               = 2048;
-        analyser.smoothingTimeConstant = 0.8;
-        freqData = new Uint8Array(analyser.frequencyBinCount);
+function startMic(){
+  if(recog && !listening){ recog.start(); listening=true; }
+  if(!audioCtx){
+    navigator.mediaDevices.getUserMedia({audio:true,video:false})
+      .then(stream=>{
+        audioCtx=new (window.AudioContext||window.webkitAudioContext)();
+        analyser=audioCtx.createAnalyser();
+        analyser.fftSize=2048;
+        analyser.smoothingTimeConstant=0.8;
+        freqData=new Uint8Array(analyser.frequencyBinCount);
         audioCtx.createMediaStreamSource(stream).connect(analyser);
       })
-      .catch(() => {});
+      .catch(()=>{});
   }
 }
 
-function renderText(t) {
+function renderText(t){
   const sz = calcTextSize(t);
   pg.clear();
   pg.push();
-  pg.textAlign(CENTER, CENTER);
+  pg.textAlign(CENTER,CENTER);
   pg.textStyle(BOLD);
   pg.textSize(sz);
   pg.fill(255); pg.noStroke();
-  pg.translate(width / 2, height / 2);
+  pg.translate(width/2, height/2);
   pg.text(t, 0, 0);
   pg.pop();
   pg.loadPixels();
-
-  const targets = [];
-  for (let y = 0; y < height; y += STEP) {
-    for (let x = 0; x < width; x += STEP) {
-      const i = 4 * (y * width + x);
-      if (pg.pixels[i + 3] > 128) targets.push(createVector(x, y));
+  const targets=[];
+  for(let y=0;y<height;y+=STEP){
+    for(let x=0;x<width;x+=STEP){
+      const i=4*(y*width+x);
+      if(pg.pixels[i+3]>128) targets.push(createVector(x,y));
     }
   }
-
-  const total = min(MAX_PARTS, targets.length);
-  while (parts.length < total) parts.push(newPart(random(width), random(height)));
-  if (parts.length > total) parts.length = total;
-  shuffle(targets, true);
-  for (let i = 0; i < parts.length; i++) parts[i].target = targets[i].copy();
+  const total=min(MAX_PARTS, targets.length);
+  while(parts.length<total) parts.push(newPart(random(width),random(height)));
+  if(parts.length>total) parts.length=total;
+  shuffle(targets,true);
+  for(let i=0;i<parts.length;i++) parts[i].target=targets[i].copy();
 }
 
-function newPart(x, y) {
-  return {
-    pos:      createVector(x, y),
-    vel:      p5.Vector.random2D().mult(random(2)),
-    acc:      createVector(0, 0),
-    target:   createVector(x, y),
-    maxSpeed: 8,
-    maxForce: 0.6,
-    r:        2 + random(1.5),
-    cr: 255, cg: 255, cb: 255
-  };
+function newPart(x,y){
+  return {pos:createVector(x,y),
+          vel:p5.Vector.random2D().mult(random(2)),
+          acc:createVector(0,0),
+          target:createVector(x,y),
+          maxSpeed:8,maxForce:0.6,
+          r:2+random(1.5)};
 }
 
-// columna de pixels de la franja más reciente del espectrograma
-let specColumn = null;
-
-function readSpecColumn() {
-  const x  = (specHead - 2 + width) % width;
-  specColumn = specCtx2d.getImageData(x, 0, 1, height).data;
-}
-
-function specPixelAt(py) {
-  if (!specColumn) return null;
-  const y   = Math.max(0, Math.min(height - 1, Math.floor(py)));
-  const idx = y * 4;
-  return [specColumn[idx], specColumn[idx + 1], specColumn[idx + 2]];
-}
-
-function drawSpectrogram() {
-  if (!analyser) return;
+function drawSpectrogram(){
+  if(!analyser) return;
   analyser.getByteFrequencyData(freqData);
-  const bins = freqData.length;
-  const x    = specHead;
-
-  specCtx2d.fillStyle = '#000';
-  specCtx2d.fillRect(x, 0, 3, height);
-
-  for (let i = 0; i < bins; i++) {
-    const v      = freqData[i] / 255;
-    if (v < 0.015) continue;
-    const freq_t = i / bins;
-    const y      = height - (freq_t * height);
-    const h_px   = (height / bins) + 1;
-    const hue    = 35 + freq_t * 150;
-    specCtx2d.fillStyle = `hsla(${hue},90%,${10 + v * 68}%,${0.25 + v * 0.65})`;
-    specCtx2d.fillRect(x, y, 2, h_px);
+  const bins=freqData.length;
+  const x=specHead;
+  specCtx2d.fillStyle='#000';
+  specCtx2d.fillRect(x,0,3,height);
+  for(let i=0;i<bins;i++){
+    const v=freqData[i]/255;
+    if(v<0.015) continue;
+    const freq_t=i/bins;
+    const y=height-(freq_t*height);
+    const h=(height/bins)+1;
+    const hue=35+freq_t*150;
+    specCtx2d.fillStyle=`hsla(${hue},90%,${10+v*68}%,${0.25+v*0.65})`;
+    specCtx2d.fillRect(x,y,2,h);
   }
-  specHead = (specHead + 2) % width;
+  specHead=(specHead+2)%width;
+  const x0=specHead;
+  drawingContext.drawImage(specBuf, x0,0,width-x0,height, 0,0,width-x0,height);
+  if(x0>0) drawingContext.drawImage(specBuf, 0,0,x0,height, width-x0,0,x0,height);
 }
 
-function blitSpectrogram() {
-  const x0 = specHead;
-  drawingContext.drawImage(specBuf, x0, 0, width - x0, height,      0, 0, width - x0, height);
-  if (x0 > 0)
-    drawingContext.drawImage(specBuf, 0,  0, x0,        height, width - x0, 0, x0, height);
-}
-
-function draw() {
-  background(0, 40);
+function draw(){
+  background(0,40);
   drawSpectrogram();
-  blitSpectrogram();
-  readSpecColumn();   // lee la columna recién pintada — un solo getImageData por frame
-
   noStroke();
-  const tt = millis() * 0.0004;
-
-  for (const p of parts) {
-    const desired = p5.Vector.sub(p.target, p.pos);
-    const d       = desired.mag();
-    desired.setMag(d < 60 ? map(d, 0, 60, 0, p.maxSpeed) : p.maxSpeed);
-    const steer = p5.Vector.sub(desired, p.vel).limit(p.maxForce);
-    const n     = noise(p.pos.x * 0.005, p.pos.y * 0.005, tt);
-    const flow  = p5.Vector.fromAngle(map(n, 0, 1, -PI, PI)).mult(0.15);
-
-    p.acc.set(0, 0);
+  const tt=millis()*0.0004;
+  for(const p of parts){
+    const desired=p5.Vector.sub(p.target,p.pos);
+    const d=desired.mag();
+    desired.setMag(d<60?map(d,0,60,0,p.maxSpeed):p.maxSpeed);
+    const steer=p5.Vector.sub(desired,p.vel).limit(p.maxForce);
+    const n=noise(p.pos.x*0.005,p.pos.y*0.005,tt);
+    const flow=p5.Vector.fromAngle(map(n,0,1,-PI,PI)).mult(0.15);
+    p.acc.set(0,0);
     p.acc.add(steer).add(flow);
     p.vel.add(p.acc).limit(p.maxSpeed);
     p.pos.add(p.vel);
-
-    const px  = specPixelAt(p.pos.y);
-    const lerpF = 0.08;
-
-    if (px && (px[0] + px[1] + px[2]) > 15) {
-      // pixel con color real del espectrograma
-      p.cr = lerp(p.cr, px[0], lerpF);
-      p.cg = lerp(p.cg, px[1], lerpF);
-      p.cb = lerp(p.cb, px[2], lerpF);
-    } else {
-      // sin audio en esa banda → decae a negro
-      p.cr = lerp(p.cr, 0, lerpF * 0.15);
-      p.cg = lerp(p.cg, 0, lerpF * 0.15);
-      p.cb = lerp(p.cb, 0, lerpF * 0.15);
-    }
-
-    const alpha = constrain(map(d, 0, 120, 255, 80), 80, 255);
-    fill(p.cr, p.cg, p.cb, alpha);
-    circle(p.pos.x, p.pos.y, p.r);
+    fill(255, constrain(map(d,0,120,255,40),40,255));
+    circle(p.pos.x,p.pos.y,p.r);
   }
 }
 </script>
